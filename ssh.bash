@@ -3,17 +3,18 @@
 print_usage() {
     echo "Usage: $PROGRAM ssh action"
     echo "Actions:"
-    echo "  add:        add new key to password store"
-    echo "  list|ls:    list keys in password store"
-    echo "  show|cat:   print the public key to stdout"
-    echo "  extract:    extract keys from password store and save to user SSH directory"
-    echo "  remove|rm:  remove keys from password store"
-    echo "  agent:      add key to SSH agent"
+    echo "  add:               add new key to password store"
+    echo "  list|ls:           list keys in password store"
+    echo "  show|cat:          print the public key to stdout"
+    echo "  edit:              add/edit/remove passphrase for encrypted keys"
+    echo "  extract:           extract keys from password store and save to user SSH directory"
+    echo "  delete|remove|rm:  remove keys from password store"
+    echo "  agent:             add key to SSH agent"
     exit 0
 }
 
 # TODO: add dependency checks
-# TODO: add encryption passphrase management for encrypted keys
+# TODO: better clipboard management
 # TODO: add README
 
 SSH_DIR="${SSH_DIR:-$HOME/.ssh}"
@@ -36,7 +37,7 @@ cmd_add() {
     fi
 
     # Check for a valid dir_name
-    if [ -d "$PREFIX/$PASS_SSH_DIR/$dir_name" ]; then
+    if [[ -d "$PREFIX/$PASS_SSH_DIR/$dir_name" ]]; then
         read -r -p "A key with name $dir_name already exists in the store. Do you want to pick a different name? [Y/n] " response
         if [[ $response != [nN] ]]; then
             read -p "Enter name: " dir_name
@@ -45,7 +46,7 @@ cmd_add() {
             exit 0
         fi
     fi
-    if [ -z "$dir_name" ]; then
+    if [[ -z "$dir_name" ]]; then
         read -r -p "The name of the key cannot be empty. Do you want to pick a name? [Y/n]" response
         if [[ $response != [nN] ]]; then
             read -p "Enter name: " dir_name
@@ -53,7 +54,7 @@ cmd_add() {
             exit 0
         fi
     fi
-    if [ -z "$dir_name" ]; then
+    if [[ -z "$dir_name" ]]; then
         echo "Error: the name of the key cannot be empty."
         exit 1
     fi
@@ -61,27 +62,51 @@ cmd_add() {
     mkdir -p "$PREFIX/$PASS_SSH_DIR/$dir_name"
     local priv_key="$PREFIX/$PASS_SSH_DIR/$dir_name/$key_name.gpg"
     local pub_key="$PREFIX/$PASS_SSH_DIR/$dir_name/$key_name.pub.gpg"
-    set_git "$priv_key"
-    set_git "$pub_key"
     set_gpg_recipients "$PREFIX/$PASS_SSH_DIR/$dir_name"
 
     cat "$SSH_DIR/$key_name" | $GPG -e "${GPG_RECIPIENT_ARGS[@]}" -o "$priv_key" "${GPG_OPTS[@]}"
     cat "$SSH_DIR/$key_name.pub" | $GPG -e "${GPG_RECIPIENT_ARGS[@]}" -o "$pub_key" "${GPG_OPTS[@]}"
 
-    git_add_file $priv_key "Added $dir_name SSH private key."
-    git_add_file $pub_key "Added $dir_name SSH public key."
+    read -r -p "If the private key is encrypted, you can optionally save the passphrase. Do you want to add it? [Y/n]" response
+    if [[ $response != [nN] ]]; then
+        read -s -p "Enter passphrase: " key_passphrase
+        echo
+        read -s -p "Enter passphrase again: " key_passphrase_2
+        echo
+        
+        while [[ "$key_passphrase" != "$key_passphrase_2" ]]; do
+            echo "Passphrase doesn't match. Try again."
+            read -s -p "Enter passphrase: " key_passphrase
+            echo
+            read -s -p "Enter passphrase again: " key_passphrase_2
+            echo
+        done
+        
+        if [[ -n "$key_passphrase" ]]; then
+            echo "$key_passphrase" | $GPG -e "${GPG_RECIPIENT_ARGS[@]}" -o "$PREFIX/$PASS_SSH_DIR/$dir_name/passphrase.gpg" "${GPG_OPTS[@]}"
+        else
+            echo "No passphrase provided. Continuing without it. Run pass ssh edit to add it later."
+        fi   
+    fi
+
+    if [[ -d $GIT_DIR && -d "$PREFIX/$PASS_SSH_DIR/$dir_name" ]]; then
+        git -C $PREFIX add "$PREFIX/$PASS_SSH_DIR/$dir_name"
+        git -C $PREFIX commit -m "Added $dir_name SSH keys"
+    fi
 }
 
 cmd_list () {
     if [[ -n "$key_list" ]]; then
-        echo "$(basename $key_list)"
+        for key in $key_list; do
+            echo "$(basename $key)"
+        done
     else
         echo "No SSH key in password store."
         exit 0
     fi
 }
 
-cmd_show() {
+cmd_show () {
     if [[ -n "$key_list" ]]; then
         local dir_name="$(echo $key_list | xargs -n 1 basename | fzf)"
         local pub_key=$(find "$PREFIX/$PASS_SSH_DIR/$dir_name" -name "*.pub.gpg")
@@ -92,6 +117,82 @@ cmd_show() {
             echo "Error: key files missing"
             exit 1
         fi
+    else
+        echo "Error: no SSH key in password store."
+        exit 1
+    fi
+}
+
+cmd_edit () {
+    if [[ -n "$key_list" ]]; then
+        local dir_name="$(echo $key_list | xargs -n 1 basename | fzf)"
+        set_gpg_recipients "$PREFIX/$PASS_SSH_DIR/$dir_name"
+        
+        if [[ -f "$PREFIX/$PASS_SSH_DIR/$dir_name/passphrase.gpg" ]]; then
+            read -p "Do you want to overwrite the passphrase? [Y/n]" response
+            if [[ $response != [nN] ]]; then
+                read -s -p "Enter new passphrase: " key_passphrase
+                echo
+                read -s -p "Enter new passphrase again: " key_passphrase_2
+                echo
+                
+                while [[ "$key_passphrase" != "$key_passphrase_2" ]]; do
+                    echo "Passphrase doesn't match. Try again."
+                    read -s -p "Enter new passphrase: " key_passphrase
+                    echo
+                    read -s -p "Enter new passphrase again: " key_passphrase_2
+                done
+                
+                if [[ -n "$key_passphrase" ]]; then
+                    rm -f "$PREFIX/$PASS_SSH_DIR/$dir_name/passphrase.gpg"
+                    echo "$key_passphrase" | $GPG -e "${GPG_RECIPIENT_ARGS[@]}" -o "$PREFIX/$PASS_SSH_DIR/$dir_name/passphrase.gpg" "${GPG_OPTS[@]}"
+                    if [[ -d $GIT_DIR && -f "$PREFIX/$PASS_SSH_DIR/$dir_name/passphrase.gpg" ]]; then
+                        git -C $PREFIX add "$PREFIX/$PASS_SSH_DIR/$dir_name/passphrase.gpg"
+                        git -C $PREFIX commit -m "Updated passphrase for $dir_name SSH keys"
+                    fi
+                else
+                    read -p "No passphrase provided. Do you want to remove the existing passphrase? [y/N]" response
+                    if [[ $response != [yY] ]]; then
+                        exit 0
+                    else
+                        rm -f "$PREFIX/$PASS_SSH_DIR/$dir_name/passphrase.gpg"
+                        if [[ -d $GIT_DIR && ! -f "$PREFIX/$PASS_SSH_DIR/$dir_name/passphrase.gpg" ]]; then
+                            git -C $PREFIX rm -qr "$PREFIX/$PASS_SSH_DIR/$dir_name/passphrase.gpg"
+                            git -C $PREFIX commit -m "Removed passphrase for $dir_name SSH keys"
+                        fi
+                    fi
+                fi
+            fi
+            
+        else
+            read -p "No passphrase found. Do you want to add it? [Y/n]" response
+            if [[ $response != [nN] ]]; then
+                read -s -p "Enter passphrase: " key_passphrase
+                echo
+                read -s -p "Enter passphrase again: " key_passphrase_2
+                echo
+                
+                while [[ "$key_passphrase" != "$key_passphrase_2" ]]; do
+                    echo "Passphrase doesn't match. Try again."
+                    read -s -p "Enter passphrase: " key_passphrase
+                    echo
+                    read -s -p "Enter passphrase again: " key_passphrase_2
+                    echo
+                done
+                
+                if [[ -n "$key_passphrase" ]]; then
+                    echo "$key_passphrase" | $GPG -e "${GPG_RECIPIENT_ARGS[@]}" -o "$PREFIX/$PASS_SSH_DIR/$dir_name/passphrase.gpg" "${GPG_OPTS[@]}"
+                    if [[ -d $GIT_DIR && -f "$PREFIX/$PASS_SSH_DIR/$dir_name/passphrase.gpg" ]]; then
+                        git -C $PREFIX add "$PREFIX/$PASS_SSH_DIR/$dir_name/passphrase.gpg"
+                        git -C $PREFIX commit -m "Added passphrase for $dir_name SSH keys"
+                    fi
+                else
+                    echo "No passphrase provided. Nothing is added."
+                    exit 0
+                fi   
+            fi
+        fi
+        
     else
         echo "Error: no SSH key in password store."
         exit 1
@@ -147,13 +248,18 @@ cmd_agent () {
         local dir_name="$(echo $key_list | xargs -n 1 basename | fzf)"
         local pub_key=$(find "$PREFIX/$PASS_SSH_DIR/$dir_name" -name "*.pub.gpg")
         local private_key="${pub_key%.pub.gpg}"
+        local passfile="$PREFIX/$PASS_SSH_DIR/$dir_name/passphrase.gpg"
         if [[ ! -f "$private_key.gpg" ]]; then
             echo "Error: key files missing"
             exit 1
         fi
-
-        ssh-add - <<< "$($GPG -q -d ${GPG_OPTS[@]} $private_key.gpg)"
-
+        if [[ -f "$passfile" ]]; then
+            read -r -p "Passphrase for this key is in password store. Do you want to copy it in the clipboard? [Y/n]" response
+            if [[ $response != [nN] ]]; then
+                $GPG -q -d ${GPG_OPTS[@]} $passfile | wl-copy
+            fi
+        fi
+        ssh-add - <<< "$($GPG -q -d ${GPG_OPTS[@]} $private_key.gpg)"  
     else
         echo "Error: no SSH key in password store."
         exit 1
@@ -167,6 +273,8 @@ case $1 in
         shift && cmd_list "$@";;
     show|cat)
         shift && cmd_show "$@";;
+    edit)
+        shift && cmd_edit "$@";;
     extract)
         shift && cmd_extract "$@";;
     delete|remove|rm)
