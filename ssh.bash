@@ -5,6 +5,7 @@ print_usage() {
     echo "Actions:"
     echo "  add:               add new key to password store"
     echo "  list|ls:           list keys in password store"
+    echo "    --print:           print list of keys to stdout"
     echo "  edit:              add/edit/remove passphrase for encrypted keys"
     echo "  show|cat:          print the public key to stdout"
     echo "    --private:         print the private key to stdout"
@@ -114,10 +115,41 @@ cmd_add() {
 
 # list keys in password store
 cmd_list () {
+    local print_list=false
+
+    while [[ "$1" == --* ]]; do
+        case "$1" in
+            --print)
+                print_list=true
+                shift;;
+            *)
+                echo "Error: unknown option: $1"
+                exit 1;;
+        esac
+    done
+
     if [[ -n "$key_list" ]]; then
-        for key in $key_list; do
-            echo "$(basename $key)"
-        done
+
+        # print list to stdout
+        if $print_list; then
+            local num_keys=$(echo "$key_list" | wc -l)
+            echo "Total keys found: $num_keys"
+            # ask before printing if too many keys
+            if [[ $num_keys -gt 15 ]]; then
+                read -p "Are you sure you want to print all of them? [y/N]" response
+                if [[ $response != [yY] ]]; then
+                    exit 0
+                else
+                    echo "$key_list" |  xargs -n 1 basename
+                fi
+            else
+                echo "$key_list" |  xargs -n 1 basename
+            fi
+
+        # show list wiyh fzf
+        else
+            echo "$key_list" |  xargs -n 1 basename | fzf
+        fi
     else
         echo "No SSH key in password store."
         exit 0
@@ -316,10 +348,10 @@ cmd_extract () {
             echo "Error: key files missing"
             exit 1
         fi
-        
+
         # this will be the filename of the key at the user SSH directory
         local key_name="$(basename $private_key)"
-       
+
         while : ; do
             # check for collisions and find a valid filename for the key
             if $extract_private && $extract_public; then
@@ -413,7 +445,7 @@ cmd_agent () {
 
         # add to agent
         ssh-add - <<< "$($GPG -q -d ${GPG_OPTS[@]} $private_key.gpg)"
-        
+
     else
         echo "Error: no SSH key in password store."
         exit 1
