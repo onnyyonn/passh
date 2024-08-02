@@ -11,6 +11,7 @@ print_usage() {
     echo "    --private:         print the private key to stdout"
     echo "    --passphrase:      print the encryption passphrase to stdout"
     echo "    --copy:            copy the output to the clipboard"
+    echo "    --qr:              print a qr-code to stdout"
     echo "  extract:           extract keys from password store and save to user SSH directory"
     echo "    --public:          extract public key only"
     echo "    --private:         extract private key only"
@@ -245,6 +246,7 @@ cmd_show () {
     local show_private=false
     local show_passphrase=false
     local copy_to_clipboard=false
+    local show_qr=false
 
     while [[ "$1" == --* ]]; do
         case "$1" in
@@ -256,6 +258,9 @@ cmd_show () {
                 shift;;
             --copy)
                 copy_to_clipboard=true
+                shift;;
+            --qr)
+                show_qr=true
                 shift;;
             *)
                 echo "Error: unknown option: $1"
@@ -278,18 +283,24 @@ cmd_show () {
         if [[ -f "$private_key.gpg" ]]; then # ensure that both public and private keys exist in the password store
             # print private key
             if $show_private; then
-                if $copy_to_clipboard; then
-                    $GPG -d "${GPG_OPTS[@]}" "$private_key.gpg" | tee >($CLIPBOARD_COPY) || exit $?
+                if $show_qr; then
+                    $GPG -d "${GPG_OPTS[@]}" "$private_key.gpg" | qrencode -t ansiutf8 || exit $?
                 else
                     $GPG -d "${GPG_OPTS[@]}" "$private_key.gpg" || exit $?
+                fi
+                if $copy_to_clipboard; then
+                     $GPG -d "${GPG_OPTS[@]}" "$private_key.gpg" | $CLIPBOARD_COPY || exit $?
                 fi
             # print encryption passphrase if exists
             elif $show_passphrase; then
                 if [[ -f "$passfile" ]]; then
-                    if $copy_to_clipboard; then
-                        $GPG -d "${GPG_OPTS[@]}" "$passfile" | tee >($CLIPBOARD_COPY) || exit $?
+                    if $show_qr; then
+                        $GPG -d "${GPG_OPTS[@]}" "$passfile" | qrencode -t ansiutf8 || exit $?
                     else
                         $GPG -d "${GPG_OPTS[@]}" "$passfile" || exit $?
+                    fi
+                    if $copy_to_clipboard; then
+                        $GPG -d "${GPG_OPTS[@]}" "$passfile" | $CLIPBOARD_COPY || exit $?
                     fi
                 else
                     echo "Error: no passphrase found."
@@ -297,10 +308,13 @@ cmd_show () {
                 fi
             # print public key
             else
-                if $copy_to_clipboard; then
-                    $GPG -d "${GPG_OPTS[@]}" "$private_key.pub.gpg" | tee >($CLIPBOARD_COPY) || exit $?
+                if $show_qr; then
+                    $GPG -d "${GPG_OPTS[@]}" "$private_key.pub.gpg" | qrencode -t ansiutf8 || exit $?
                 else
                     $GPG -d "${GPG_OPTS[@]}" "$private_key.pub.gpg" || exit $?
+                fi
+                if $copy_to_clipboard; then
+                    $GPG -d "${GPG_OPTS[@]}" "$private_key.pub.gpg" | $CLIPBOARD_COPY || exit $?
                 fi
             fi
         else
