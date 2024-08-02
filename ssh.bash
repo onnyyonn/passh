@@ -21,12 +21,12 @@ print_usage() {
 }
 
 # TODO: add dependency checks
-# TODO: better fzf options
 # TODO: add README
 
 SSH_DIR="${SSH_DIR:-$HOME/.ssh}"
 PASS_SSH_DIR="${PASS_SSH_DIR:-ssh_keys}"
 GIT_DIR="${PASSWORD_STORE_GIT:-$PREFIX}/.git"
+FZF="fzf --height 40% --reverse --no-multi"
 CLIPBOARD_COPY="wl-copy" # "wl-copy" for wayland, "xclip -selection clipboard" for x11
 
 # list of all keys currently stored in password store
@@ -39,7 +39,7 @@ __extract_key_comment () {
 
 # add new key to password store
 cmd_add() {
-    local key_name="$(ls $SSH_DIR/*.pub | fzf | xargs -n 1 basename | sed 's/.pub$//')" # filename of the key in user SSH directory
+    local key_name="$(ls $SSH_DIR/*.pub | $FZF | xargs -n 1 basename | sed 's/.pub$//')" # filename of the key in user SSH directory
     local dir_name="$(__extract_key_comment $key_name)" # this is going to be the name of the key directory in the password store
 
     # key_name was fuzzily selected from available public keys.
@@ -149,7 +149,7 @@ cmd_list () {
 
         # show list wiyh fzf
         else
-            echo "$key_list" |  xargs -n 1 basename | fzf
+            echo "$key_list" |  xargs -n 1 basename | $FZF
         fi
     else
         echo "No SSH key in password store."
@@ -160,7 +160,13 @@ cmd_list () {
 # add/edit/remove encryption passphrase
 cmd_edit () {
     if [[ -n "$key_list" ]]; then
-        local dir_name="$(echo $key_list | xargs -n 1 basename | fzf)"
+
+        local dir_name="$(echo $key_list | xargs -n 1 basename | $FZF)"
+        if [[ -z "$dir_name" ]]; then
+            echo "No key selected."
+            exit 0
+        fi
+
         local passfile="$PREFIX/$PASS_SSH_DIR/$dir_name/passphrase.gpg"
         set_gpg_recipients "$PREFIX/$PASS_SSH_DIR/$dir_name"
 
@@ -275,7 +281,13 @@ cmd_show () {
     fi
 
     if [[ -n "$key_list" ]]; then
-        local dir_name="$(echo $key_list | xargs -n 1 basename | fzf)"
+
+        local dir_name="$(echo $key_list | xargs -n 1 basename | $FZF)"
+        if [[ -z "$dir_name" ]]; then
+            echo "No key selected."
+            exit 0
+        fi
+
         local pub_key=$(find "$PREFIX/$PASS_SSH_DIR/$dir_name" -name "*.pub.gpg")
         local private_key="${pub_key%.pub.gpg}"
         local passfile="$PREFIX/$PASS_SSH_DIR/$dir_name/passphrase.gpg"
@@ -353,7 +365,11 @@ cmd_extract () {
     fi
 
     if [[ -n "$key_list" ]]; then
-        local dir_name="$(echo $key_list | xargs -n 1 basename | fzf)"
+        local dir_name="$(echo $key_list | xargs -n 1 basename | $FZF)"
+        if [[ -z "$dir_name" ]]; then
+            echo "No key selected."
+            exit 0
+        fi
 
         # check if both public and private key exists in the password store
         local pub_key=$(find "$PREFIX/$PASS_SSH_DIR/$dir_name" -name "*.pub.gpg")
@@ -423,7 +439,13 @@ cmd_extract () {
 # delete key from password store
 cmd_delete () {
     if [[ -n "$key_list" ]]; then
-        local dir_name="$(echo $key_list | xargs -n 1 basename | fzf)"
+
+        local dir_name="$(echo $key_list | xargs -n 1 basename | $FZF)"
+        if [[ -z "$dir_name" ]]; then
+            echo "No key selected."
+            exit 0
+        fi
+
         rm -r -f "$PREFIX/$PASS_SSH_DIR/$dir_name"
         if [[ -d $GIT_DIR && ! -d "$PREFIX/$PASS_SSH_DIR/$dir_name" ]]; then
             git -C $PREFIX rm -qr "$PREFIX/$PASS_SSH_DIR/$dir_name"
@@ -438,7 +460,11 @@ cmd_delete () {
 # add key from password store to the agent
 cmd_agent () {
     if [[ -n "$key_list" ]]; then
-        local dir_name="$(echo $key_list | xargs -n 1 basename | fzf)"
+        local dir_name="$(echo $key_list | xargs -n 1 basename | $FZF)"
+        if [[ -z "$dir_name" ]]; then
+            echo "No key selected."
+            exit 0
+        fi
 
         # check if both public and private key exists in the password store
         local pub_key=$(find "$PREFIX/$PASS_SSH_DIR/$dir_name" -name "*.pub.gpg")
